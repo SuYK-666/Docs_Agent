@@ -5,7 +5,7 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
-  workflow_dispatch: # 建议加上这个，这样你可以在 Actions 页面手动点击运行
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -25,4 +25,9 @@ jobs:
           filter-author: (renovate\[bot\]|dependabot\[bot\]|github-actions\[bot\])
           avatarSize: 42
           output: contributors.svg
-          commit-message: "chore: update contributors.svg"
+
+      - name: Commit & Push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update contributors.svg"
+          file_pattern: 'contributors.svg'
