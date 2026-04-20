@@ -12,9 +12,12 @@ import {
   Clock3,
   Code2,
   Database,
+  FileUp,
+  FolderInput,
   GitBranch,
   Layers3,
   LineChart,
+  Link2,
   ListChecks,
   Menu,
   Moon,
@@ -312,6 +315,7 @@ const SchedulerView = () => {
             <Metric icon={ShieldCheck} label="准点率" value="97%" tone="text-pink-100" />
           </div>
         </GlassEffect>
+        <UploadMethods />
         <ControlStrip />
       </div>
 
@@ -583,5 +587,59 @@ const ControlStrip = () => (
     </div>
   </GlassEffect>
 )
+
+const UploadMethods = () => {
+  const methods = [
+    {
+      icon: FileUp,
+      title: '本地文件上传',
+      note: 'PDF / Word / 图片 / 表格',
+      action: '选择文件',
+    },
+    {
+      icon: Link2,
+      title: '链接采集上传',
+      note: '网页 URL / 在线文档地址',
+      action: '粘贴链接',
+    },
+    {
+      icon: FolderInput,
+      title: '批量目录导入',
+      note: '文件夹队列 / 数据工作区',
+      action: '导入目录',
+    },
+  ]
+
+  return (
+    <GlassEffect className="rounded-3xl p-5" contentClassName="w-full">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-white/55">任务输入</p>
+          <h2 className="text-xl font-bold text-white">三种上传方式</h2>
+        </div>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/65">入队后自动调度</span>
+      </div>
+
+      <div className="grid gap-3">
+        {methods.map((method) => (
+          <button key={method.title} className="group flex w-full items-center justify-between gap-4 rounded-2xl border border-white/10 bg-black/18 px-4 py-3 text-left transition-colors hover:bg-white/14">
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="grid h-11 w-11 flex-none place-items-center rounded-2xl bg-white/15 transition-colors group-hover:bg-cyan-300/20">
+                <method.icon className="h-5 w-5 text-cyan-100" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate font-semibold text-white">{method.title}</span>
+                <span className="block truncate text-sm text-white/55">{method.note}</span>
+              </span>
+            </span>
+            <span className="flex-none rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/75 group-hover:bg-white/20">
+              {method.action}
+            </span>
+          </button>
+        ))}
+      </div>
+    </GlassEffect>
+  )
+}
 
 export { NavbarHero }
