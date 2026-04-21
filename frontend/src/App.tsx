@@ -1,14 +1,21 @@
-import { NavbarHero } from '@/components/ui/hero-with-video'
+import LandingPage from '@/pages/Landing'
+import DashboardPage from '@/pages/Dashboard'
+import { useJobMonitor } from '@/hooks/useJobMonitor'
+import TerminalPage from '@/pages/Terminal'
+import WorkspacePage from '@/pages/Workspace'
+import { Navigate, Route, Routes } from 'react-router-dom'
 
 function App() {
+  const { startJob, statusData } = useJobMonitor()
+
   return (
-    <NavbarHero
-      brandName="NexusOps"
-      heroTitle="文档智能体运行中枢"
-      heroSubtitle="实时编排 / 协同执行 / 数据闭环"
-      heroDescription="把任务调度、智能体态势、逻辑流控制和数据资产集中到一个可操作的前端控制台。"
-      backgroundImage="https://images.unsplash.com/photo-1451187580459-43490279c0fa?ixlib=rb-4.0.3&auto=format&fit=crop&w=2072&q=80"
-    />
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/dashboard" element={<DashboardPage startJob={startJob} statusData={statusData} />} />
+      <Route path="/terminal" element={<TerminalPage statusData={statusData} />} />
+      <Route path="/workspace" element={<WorkspacePage />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 
