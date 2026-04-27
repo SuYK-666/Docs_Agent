@@ -610,6 +610,14 @@ def _resolve_ocr_workers(settings: Mapping[str, Any], source_count: int) -> int:
 
 
 def _build_draft_payload(draft_token: str, source_file: Path, cache_path: Path, draft_output: Mapping[str, Any]) -> dict[str, Any]:
+    # 👇 1. 从根节点提取真实的质检总分和评价
+    critic_eval = draft_output.get("critic_evaluation", {})
+    if not isinstance(critic_eval, dict):
+        critic_eval = {}
+        
+    real_score = critic_eval.get("total_score")
+    real_feedback = critic_eval.get("critic_feedback", "")
+
     tasks_raw = draft_output.get("tasks", []) if isinstance(draft_output.get("tasks"), list) else []
     tasks_payload: list[dict[str, Any]] = []
     for item in tasks_raw:
@@ -622,6 +630,9 @@ def _build_draft_payload(draft_token: str, source_file: Path, cache_path: Path, 
                 "owner": str(item.get("owner", "")).strip(),
                 "deadline": str(item.get("deadline", "")).strip(),
                 "deadline_display": str(item.get("deadline_display", "")).strip(),
+                # 👇 2. 把真实的打分和评价硬塞给前端需要的字段
+                "score": real_score,
+                "criticFeedback": real_feedback,
             }
         )
 
@@ -1134,12 +1145,18 @@ async def _process_job_async(
                         return await _process_single_source(index=index, source_file=source_file)
 
                 def _schedule_discovered_source(raw_source: str, parser_hint: str = "") -> None:
+                    if len(effective_source_files) >= crawl_limit:
+                        return
+
                     source_path = _resolve_discovered_source(raw_source)
                     if source_path is None:
                         return
 
                     source_name = source_path.name
                     if source_name in crawl_seen_files:
+                        return
+
+                    if len(effective_source_files) >= crawl_limit:
                         return
 
                     crawl_seen_files.add(source_name)

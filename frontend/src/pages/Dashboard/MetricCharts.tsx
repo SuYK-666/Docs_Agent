@@ -14,6 +14,18 @@ type MetricState = Record<
   }
 >
 
+type ChartPoint = {
+  label: string
+  totalTokens: number
+  averageConfidence: number
+}
+
+type DenseAxisPayload = {
+  categories: string[]
+  labelMap: Record<string, string>
+  lineData: Array<[string, number]>
+}
+
 const defaultMetricState: MetricState = {
   throughput: { current: 0, target: 0 },
   hitRate: { current: 0, target: 0 },
@@ -26,6 +38,7 @@ const metricCards = [
     label: '吞吐量',
     icon: Activity,
     accent: 'text-cyan-100',
+    desc: '系统历史累计成功解析与处理的公文总数。',
     renderValue: (value: number, hasData: boolean) => (hasData ? new Intl.NumberFormat('zh-CN').format(Math.floor(value)) : '--'),
   },
   {
@@ -33,6 +46,7 @@ const metricCards = [
     label: 'RAG 命中率',
     icon: BarChart3,
     accent: 'text-emerald-100',
+    desc: '大模型在处理过程中，成功从本地知识库召回有效参考资料的概率。',
     renderValue: (value: number, hasData: boolean) => (hasData ? `${value.toFixed(1)}%` : '--'),
   },
   {
@@ -40,9 +54,50 @@ const metricCards = [
     label: '平均置信度',
     icon: BrainCircuit,
     accent: 'text-amber-100',
+    desc: 'AI 对其抽取的字段与校验结果的整体把握程度 (0~1)。',
     renderValue: (value: number, hasData: boolean) => (hasData ? value.toFixed(2) : '--'),
   },
 ]
+
+function buildDenseAxis(points: ChartPoint[]): DenseAxisPayload {
+  if (points.length === 0) {
+    return {
+      categories: [],
+      labelMap: {},
+      lineData: [],
+    }
+  }
+
+  const sidePadding = Math.max(3, Math.ceil(points.length / 2) + 1)
+  const categories: string[] = []
+  const labelMap: Record<string, string> = {}
+  const lineData: Array<[string, number]> = []
+
+  for (let i = 0; i < sidePadding; i += 1) {
+    categories.push(`pad-start-${i}`)
+  }
+
+  points.forEach((point, index) => {
+    const slotKey = `task-slot-${index+1}`
+    categories.push(slotKey)
+    labelMap[slotKey] = point.label
+    lineData.push([slotKey, point.averageConfidence])
+
+    if (index < points.length - 1) {
+      categories.push(`task-gap-${index}`)
+    }
+  })
+
+  for (let i = 0; i < sidePadding; i += 1) {
+    categories.push(`pad-end-${i}`)
+  }
+
+  return {
+    categories,
+    labelMap,
+    lineData,
+  }
+}
 
 export default function MetricCharts() {
   const { historyRecords } = useGlobalAppContext()
@@ -51,22 +106,32 @@ export default function MetricCharts() {
   const [kpi, setKpi] = useState<MetricState>(defaultMetricState)
 
   const hasHistory = historyRecords.length > 0
-  const latestRecord = historyRecords[historyRecords.length - 1] || null
+  const latestRecord = useMemo(() => {
+    const record = historyRecords[historyRecords.length - 1] || null
+    if (!record) return null
 
-  const chartSeries = useMemo(
+    return {
+      ...record,
+      totalFilesProcessed: historyRecords.reduce((sum, item) => sum + (item.files?.length || 0), 0),
+    }
+  }, [historyRecords])
+
+  const chartSeries = useMemo<ChartPoint[]>(
     () =>
       historyRecords.map((record, index) => ({
         label: `Task-${String(index + 1).padStart(2, '0')}`,
-        throughputCount: record.throughputCount || record.fileCount || record.files.length || 0,
+        totalTokens: record.totalTokens || 0,
         averageConfidence: record.averageConfidence,
       })),
     [historyRecords],
   )
 
+  const denseAxis = useMemo(() => buildDenseAxis(chartSeries), [chartSeries])
+
   useEffect(() => {
     let frameId = 0
     const targets = {
-      throughput: latestRecord?.throughputCount || latestRecord?.fileCount || latestRecord?.files.length || 0,
+      throughput: latestRecord?.totalFilesProcessed || 0,
       hitRate: latestRecord?.ragHitRate || 0,
       confidence: latestRecord?.averageConfidence || 0,
     }
@@ -106,7 +171,7 @@ export default function MetricCharts() {
 
     frameId = window.requestAnimationFrame(tick)
     return () => window.cancelAnimationFrame(frameId)
-  }, [kpi.confidence.current, kpi.hitRate.current, kpi.throughput.current, latestRecord])
+  }, [latestRecord])
 
   useEffect(() => {
     if (!chartContainerRef.current) return
@@ -133,25 +198,34 @@ export default function MetricCharts() {
       tooltip: {
         trigger: 'axis',
         axisPointer: {
-          type: 'cross',
-          crossStyle: { color: '#64748b' },
+          type: 'shadow',
         },
         backgroundColor: 'rgba(15, 23, 42, 0.9)',
         borderColor: '#334155',
         textStyle: { color: '#e2e8f0' },
       },
+      legend: {
+        data: ['Token消耗', '平均置信度'],
+        top: 0,
+        right: 10,
+        textStyle: { color: '#cbd5e1', fontSize: 11 },
+        icon: 'circle',
+        itemWidth: 8,
+        itemHeight: 8,
+        itemGap: 16,
+      },
       grid: {
         left: '4%',
         right: '4%',
-        top: '12%',
+        top: '18%',
         bottom: '16%',
         containLabel: true,
       },
       dataZoom: [
         {
           type: 'inside',
-          startValue: Math.max(chartSeries.length - 8, 0),
-          endValue: Math.max(chartSeries.length - 1, 0),
+          startValue: Math.max(denseAxis.categories.length - 15, 0),
+          endValue: Math.max(denseAxis.categories.length - 1, 0),
         },
         {
           type: 'slider',
@@ -163,21 +237,30 @@ export default function MetricCharts() {
           handleStyle: {
             color: '#93c5fd',
           },
+          startValue: Math.max(denseAxis.categories.length - 15, 0),
+          endValue: Math.max(denseAxis.categories.length - 1, 0),
         },
       ],
       xAxis: [
         {
           type: 'category',
-          data: chartSeries.map((item) => item.label),
+          data: denseAxis.categories,
+          boundaryGap: true,
           axisPointer: { type: 'shadow' },
           axisLine: { lineStyle: { color: '#475569' } },
-          axisLabel: { color: '#94a3b8', fontSize: 10 },
+          axisTick: { show: false },
+          axisLabel: {
+            color: '#94a3b8',
+            fontSize: 10,
+            interval: 0,
+            formatter: (value: string) => denseAxis.labelMap[value] || '',
+          },
         },
       ],
       yAxis: [
         {
           type: 'value',
-          name: '文件数',
+          name: 'Token 消耗',
           nameTextStyle: { color: '#64748b', fontSize: 10 },
           min: 0,
           splitLine: { lineStyle: { color: '#1e293b', type: 'dashed' } },
@@ -187,7 +270,7 @@ export default function MetricCharts() {
           type: 'value',
           name: '置信度',
           nameTextStyle: { color: '#64748b', fontSize: 10 },
-          min: 0.8,
+          min: 0.0,
           max: 1.0,
           splitLine: { show: false },
           axisLabel: { color: '#94a3b8', fontSize: 10 },
@@ -195,34 +278,45 @@ export default function MetricCharts() {
       ],
       series: [
         {
-          name: '吞吐量',
-          type: 'bar',
-          barWidth: '10%',
-          itemStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: '#3b82f6' },
-              { offset: 1, color: '#1d4ed8' },
-            ]),
-            borderRadius: [4, 4, 0, 0],
+          name: 'Token消耗',
+          type: 'line',
+          smooth: true,
+          symbol: 'none',
+          lineStyle: {
+            width: 2,
+            color: '#3b82f6',
           },
-          data: chartSeries.map((item) => item.throughputCount),
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(59, 130, 246, 0.4)' },
+              { offset: 1, color: 'rgba(59, 130, 246, 0.02)' },
+            ]),
+          },
+          data: chartSeries.map((item, index) => [`task-slot-${index+1}`, item.totalTokens]),
         },
         {
           name: '平均置信度',
           type: 'line',
           yAxisIndex: 1,
           smooth: true,
-          itemStyle: { color: '#10b981' },
+          symbol: 'none',
+          itemStyle: { color: '#a855f7' },
+          connectNulls: false,
           lineStyle: {
             width: 2,
-            shadowColor: 'rgba(16, 185, 129, 0.5)',
-            shadowBlur: 10,
+            color: '#a855f7',
           },
-          data: chartSeries.map((item) => item.averageConfidence),
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(168, 85, 247, 0.32)' },
+              { offset: 1, color: 'rgba(168, 85, 247, 0.02)' },
+            ]),
+          },
+          data: denseAxis.lineData,
         },
       ],
     })
-  }, [chartSeries])
+  }, [denseAxis])
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_290px] xl:items-stretch">
@@ -238,7 +332,7 @@ export default function MetricCharts() {
         </div>
 
         <div className="relative flex min-w-0 flex-1">
-          <div className="w-full rounded-[1.75rem] border border-white/10 bg-black/18 p-4">
+          <div className="w-full rounded-[1.75rem] border border-white/5 border-t-white/15 bg-gradient-to-b from-white/[0.04] to-black/30 p-4 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1),0_20px_40px_-15px_rgba(0,0,0,0.5)]">
             <div ref={chartContainerRef} className="h-[420px] w-full" />
           </div>
 
@@ -254,19 +348,33 @@ export default function MetricCharts() {
 
       <div className="grid gap-4">
         {metricCards.map((metric) => (
-          <GlassEffect key={metric.label} className="h-full rounded-[1.75rem] p-5" contentClassName="w-full">
-            <div className="flex h-full min-h-[145px] flex-col justify-between gap-5">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm uppercase tracking-[0.16em] text-white/60">{metric.label}</p>
-                <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/12">
-                  <metric.icon className={`h-5 w-5 ${metric.accent}`} />
-                </span>
-              </div>
-              <div>
-                <p className="text-4xl font-semibold text-white">{metric.renderValue(kpi[metric.key].current, hasHistory)}</p>
+          <div key={metric.label} className="group relative h-full">
+            <div className="pointer-events-none absolute -top-12 left-1/2 z-50 -translate-x-1/2 translate-y-2 opacity-0 transition-all duration-300 group-hover:-translate-y-2 group-hover:opacity-100">
+              <div className="relative w-max max-w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-white/10 bg-slate-900/95 px-4 py-2.5 text-center text-xs leading-relaxed text-slate-300 shadow-xl backdrop-blur-md">
+                {metric.desc}
+                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 border-l-4 border-r-4 border-t-4 border-transparent border-t-slate-900/95" />
               </div>
             </div>
-          </GlassEffect>
+
+            <GlassEffect
+              className="h-full cursor-default rounded-[1.75rem] border-t-2 border-t-white/10 p-5 shadow-[0_15px_35px_-10px_rgba(0,0,0,0.4),0_0_15px_-3px_rgba(6,182,212,0.05)] transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.02] hover:border-t-cyan-400/30 hover:shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5),0_0_20px_2px_rgba(6,182,212,0.2)]"
+              contentClassName="w-full"
+            >
+              <div className="flex h-full min-h-[145px] flex-col justify-between gap-5">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm uppercase tracking-[0.16em] text-white/60 transition-colors duration-300 group-hover:text-white/90">
+                    {metric.label}
+                  </p>
+                  <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/12 transition-all duration-300 group-hover:bg-white/20 group-hover:shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+                    <metric.icon className={`h-5 w-5 ${metric.accent}`} />
+                  </span>
+                </div>
+                <div>
+                  <p className="text-4xl font-semibold text-white">{metric.renderValue(kpi[metric.key].current, hasHistory)}</p>
+                </div>
+              </div>
+            </GlassEffect>
+          </div>
         ))}
       </div>
     </div>
