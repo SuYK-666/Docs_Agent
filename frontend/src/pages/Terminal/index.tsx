@@ -1,7 +1,7 @@
 import ThinkingConsole, { type ThinkingConsoleHandle } from '@/components/ThinkingConsole'
 import { useGlobalAppContext } from '@/context/GlobalAppContext'
 import type { JobStatusData } from '@/hooks/useJobMonitor'
-import { ArrowLeft, Eye, MonitorCog, Trash2 } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Eye, MonitorCog, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -14,6 +14,7 @@ export default function TerminalPage({ statusData, onClearLogs }: TerminalPagePr
   const consoleRef = useRef<ThinkingConsoleHandle | null>(null)
   const { formState } = useGlobalAppContext()
   const [autoScroll, setAutoScroll] = useState(true)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const receivedLogs = statusData.streamMessages.length
   const processingFiles = Object.values(statusData.fileMetrics).filter((metric) => metric.status === 'active').length
 
@@ -24,88 +25,121 @@ export default function TerminalPage({ statusData, onClearLogs }: TerminalPagePr
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(1,4,9,0.12)_46%,rgba(1,4,9,0.85)_100%)]" />
 
       <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1800px] flex-col px-4 py-4 sm:px-6 lg:px-8">
-        <section className="grid flex-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="flex flex-col rounded-[1.8rem] border border-cyan-500/12 bg-black/30 p-4 shadow-[0_18px_60px_rgba(2,6,23,0.42)] backdrop-blur-xl">
-            <Link
-              to="/dashboard"
-              className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-400/25 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:border-cyan-300/45 hover:bg-cyan-300/14"
+        <section className="flex flex-1 gap-4">
+          <aside
+            className={`relative shrink-0 overflow-visible rounded-[1.8rem] border border-cyan-500/12 bg-black/30 shadow-[0_18px_60px_rgba(2,6,23,0.42)] backdrop-blur-xl transition-all duration-300 ${
+              isSidebarCollapsed ? 'w-0 border-transparent bg-transparent p-0 shadow-none' : 'w-[280px] p-4'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setIsSidebarCollapsed((current) => !current)}
+              className={`absolute top-4 z-30 grid h-9 w-9 place-items-center rounded-full border border-cyan-300/20 bg-slate-950/90 text-cyan-100 shadow-[0_10px_30px_rgba(2,6,23,0.5)] transition hover:border-cyan-200/45 hover:bg-cyan-400/12 ${
+                isSidebarCollapsed ? 'hidden' : 'right-4'
+              }`}
+              aria-label={isSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+              aria-pressed={isSidebarCollapsed}
             >
-              <ArrowLeft className="h-4 w-4" />
-              返回调度中心
-            </Link>
+              {isSidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            </button>
 
-            <div className="mt-5 rounded-[1.5rem] border border-white/8 bg-[#02060d]/90 p-4">
-              <p className="text-[11px] uppercase tracking-[0.26em] text-cyan-100/65">终端控制台</p>
-              <h1 className="mt-3 text-xl font-semibold text-white">实时监控终端</h1>
-            </div>
+            <div
+              className={`flex h-full flex-col transition-all duration-300 ${
+                isSidebarCollapsed ? 'pointer-events-none hidden opacity-0' : 'opacity-100'
+              }`}
+            >
+              <Link
+                to="/dashboard"
+                className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-400/25 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:border-cyan-300/45 hover:bg-cyan-300/14"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                返回调度中心
+              </Link>
 
-            <div className="mt-4 space-y-3">
-              <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.03] p-4">
-                <div className="flex items-center gap-2 text-cyan-100">
-                  <MonitorCog className="h-4 w-4" />
-                  <p className="text-sm font-semibold">状态卡片</p>
-                </div>
-
-                <div className="mt-4 grid gap-3">
-                  <div className="rounded-[1rem] border border-white/8 bg-black/20 px-4 py-3">
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">已接收日志数</p>
-                    <p className="mt-2 text-2xl font-semibold text-cyan-50">{receivedLogs}</p>
-                  </div>
-
-                  <div className="rounded-[1rem] border border-white/8 bg-black/20 px-4 py-3">
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">正在处理的文件数</p>
-                    <p className="mt-2 text-2xl font-semibold text-cyan-50">{processingFiles}</p>
-                  </div>
-                </div>
+              <div className="mt-5 rounded-[1.5rem] border border-white/8 bg-[#02060d]/90 p-4">
+                <p className="text-[11px] uppercase tracking-[0.26em] text-cyan-100/65">终端控制台</p>
+                <h1 className="mt-3 text-xl font-semibold text-white">实时监控终端</h1>
               </div>
 
-              <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.03] p-4">
-                <div className="flex items-center gap-2 text-cyan-100">
-                  <Eye className="h-4 w-4" />
-                  <p className="text-sm font-semibold">视图控制</p>
-                </div>
+              <div className="mt-4 space-y-3">
+                <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.03] p-4">
+                  <div className="flex items-center gap-2 text-cyan-100">
+                    <MonitorCog className="h-4 w-4" />
+                    <p className="text-sm font-semibold">状态卡片</p>
+                  </div>
 
-                <div className="mt-4 space-y-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      consoleRef.current?.clearLogs()
-                      onClearLogs()
-                    }}
-                    className="flex w-full items-center justify-center gap-2 rounded-[1rem] border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-500/18"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    清空屏幕
-                  </button>
-
-                  <label className="flex items-center justify-between rounded-[1rem] border border-white/8 bg-black/20 px-4 py-3">
-                    <div>
-                      <p className="text-sm font-semibold text-white">自动滚屏</p>
-                      <p className="mt-1 text-xs text-slate-400">关闭后保留当前位置，便于查看历史日志。</p>
+                  <div className="mt-4 grid gap-3">
+                    <div className="rounded-[1rem] border border-white/8 bg-black/20 px-4 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">已接收日志数</p>
+                      <p className="mt-2 text-2xl font-semibold text-cyan-50">{receivedLogs}</p>
                     </div>
 
+                    <div className="rounded-[1rem] border border-white/8 bg-black/20 px-4 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-slate-400">正在处理的文件数</p>
+                      <p className="mt-2 text-2xl font-semibold text-cyan-50">{processingFiles}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.03] p-4">
+                  <div className="flex items-center gap-2 text-cyan-100">
+                    <Eye className="h-4 w-4" />
+                    <p className="text-sm font-semibold">视图控制</p>
+                  </div>
+
+                  <div className="mt-4 space-y-3">
                     <button
                       type="button"
-                      onClick={() => setAutoScroll((current) => !current)}
-                      className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${
-                        autoScroll ? 'bg-cyan-500/80' : 'bg-slate-700'
-                      }`}
-                      aria-pressed={autoScroll}
+                      onClick={() => {
+                        consoleRef.current?.clearLogs()
+                        onClearLogs()
+                      }}
+                      className="flex w-full items-center justify-center gap-2 rounded-[1rem] border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100 transition hover:bg-red-500/18"
                     >
-                      <span
-                        className={`inline-block h-5 w-5 rounded-full bg-white transition ${
-                          autoScroll ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
+                      <Trash2 className="h-4 w-4" />
+                      清空屏幕
                     </button>
-                  </label>
+
+                    <label className="flex items-center justify-between rounded-[1rem] border border-white/8 bg-black/20 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-semibold text-white">自动滚屏</p>
+                        <p className="mt-1 text-xs text-slate-400">关闭后保留当前位置，便于查看历史日志。</p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setAutoScroll((current) => !current)}
+                        className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${
+                          autoScroll ? 'bg-cyan-500/80' : 'bg-slate-700'
+                        }`}
+                        aria-pressed={autoScroll}
+                      >
+                        <span
+                          className={`inline-block h-5 w-5 rounded-full bg-white transition ${
+                            autoScroll ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>
           </aside>
 
-          <section className="min-h-0 rounded-[1.9rem] border border-cyan-400/12 bg-black/30 p-3 shadow-[0_22px_80px_rgba(2,6,23,0.5)] backdrop-blur-xl">
-            <div className="h-[calc(100vh-9rem)] min-h-[760px]">
+          {isSidebarCollapsed && (
+            <button
+              type="button"
+              onClick={() => setIsSidebarCollapsed(false)}
+              className="fixed left-4 top-6 z-50 grid h-10 w-10 place-items-center rounded-full border border-cyan-300/25 bg-slate-950/95 text-cyan-100 shadow-[0_12px_36px_rgba(2,6,23,0.62)] transition hover:border-cyan-200/50 hover:bg-cyan-400/12 sm:left-6 lg:left-8"
+              aria-label="展开侧边栏"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          )}
+
+          <section className="min-w-0 flex-1 rounded-[1.9rem] border border-cyan-400/12 bg-black/30 p-3 shadow-[0_22px_80px_rgba(2,6,23,0.5)] backdrop-blur-xl">
+            <div className="h-[calc(100vh-9rem)] min-h-[760px] [&_.terminal-window_pre]:!text-[17px] [&_.terminal-window_pre]:!leading-8">
               <ThinkingConsole
                 ref={consoleRef}
                 logs={statusData.streamMessages}

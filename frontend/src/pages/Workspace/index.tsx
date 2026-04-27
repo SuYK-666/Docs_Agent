@@ -38,6 +38,8 @@ type WorkspaceDraft = {
   raw: JobDraft
 }
 
+type EditableTaskField = 'owner' | 'deadline' | 'content' | 'taskName'
+
 type WorkspaceHistoryListItem = {
   key: string
   fileName: string
@@ -124,51 +126,68 @@ function buildWorkspaceDrafts(drafts: JobDraft[]): WorkspaceDraft[] {
 
 function buildUpdatedDrafts(
   drafts: JobDraft[],
-  draftKey: string,
-  taskKey: string,
-  field: 'owner' | 'deadline',
+  draftIndex: number,
+  taskIndex: number,
+  field: EditableTaskField,
   value: string,
 ) {
-  return drafts.map((draft, draftIndex) => {
-    const workspaceDraft = buildWorkspaceDrafts([draft])[0]
-    if (!workspaceDraft || getDraftKey(draft, draftIndex) !== draftKey) return draft
+  if (draftIndex < 0 || taskIndex < 0) return drafts
 
-    const nextTasks = workspaceDraft.tasks.map((task) => {
-      const nextOwner = task.key === taskKey && field === 'owner' ? value : task.owner
-      const nextDeadline = task.key === taskKey && field === 'deadline' ? value : task.deadline
+  const nextDrafts = JSON.parse(JSON.stringify(drafts)) as JobDraft[]
+  const targetDraft = nextDrafts[draftIndex]
+  if (!targetDraft) return drafts
 
-      return {
-        ...task.raw,
-        task_id: task.taskId,
-        task_name: task.taskName,
-        content: task.content,
-        owner: nextOwner,
-        assignee: nextOwner,
-        deadline_display: nextDeadline,
-        deadline: nextDeadline,
-        score: task.score,
-        critic_feedback: task.criticFeedback,
-      }
-    })
+  const draftRecord = targetDraft as Record<string, unknown>
+  const draftJson = readRecord(draftRecord.draft_json)
+  const rawTasks = Array.isArray(draftRecord.tasks)
+    ? (draftRecord.tasks as unknown[])
+    : Array.isArray(draftJson.tasks)
+      ? (draftJson.tasks as unknown[])
+      : []
 
-    const draftRecord = draft as Record<string, unknown>
-    const draftJson = readRecord(draftRecord.draft_json)
+  if (!rawTasks[taskIndex]) return drafts
 
-    if (Object.keys(draftJson).length > 0) {
-      return {
-        ...draft,
-        draft_json: {
-          ...draftJson,
-          tasks: nextTasks,
-        },
-      }
+  const nextTasks = rawTasks.map((task, currentTaskIndex) => {
+    if (currentTaskIndex !== taskIndex) return readRecord(task)
+
+    const nextTask = { ...readRecord(task) }
+
+    if (field === 'owner') {
+      nextTask.owner = value
+      nextTask.assignee = value
     }
 
-    return {
-      ...draft,
-      tasks: nextTasks,
+    if (field === 'deadline') {
+      nextTask.deadline_display = value
+      nextTask.deadline = value
+      nextTask.due_date = value
     }
+
+    if (field === 'content') {
+      nextTask.content = value
+      nextTask.description = value
+      nextTask.summary = value
+    }
+
+    if (field === 'taskName') {
+      nextTask.task_name = value
+      nextTask.taskName = value
+      nextTask.name = value
+    }
+
+    return nextTask
   })
+
+  if (Array.isArray(draftRecord.tasks)) {
+    draftRecord.tasks = nextTasks
+  }
+
+  draftRecord.draft_json = {
+    ...draftJson,
+    tasks: nextTasks,
+  }
+
+  return nextDrafts
 }
 
 function matchReportToFileName(report: JobReport, fileName: string) {
@@ -630,8 +649,9 @@ export default function WorkspacePage({
     setReportPreviewUrl('')
   }
 
-  const updateTaskField = (draftKey: string, taskKey: string, field: 'owner' | 'deadline', value: string) => {
-    setDrafts(buildUpdatedDrafts(activeDrafts, draftKey, taskKey, field, value))
+  const updateTaskField = (taskIndex: number, field: EditableTaskField, value: string) => {
+    if (isArchivedSelection || selectedDraftIndex < 0) return
+    setDrafts(buildUpdatedDrafts(statusData.drafts, selectedDraftIndex, taskIndex, field, value))
   }
 
   const jumpDraft = (offset: number) => {
@@ -807,7 +827,7 @@ export default function WorkspacePage({
 
         <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar pr-2 p-4">
           <div className="space-y-4">
-            {selectedDraft.tasks.map((task) => {
+            {selectedDraft.tasks.map((task, taskIndex) => {
               const isLowScore = task.score < 85
 
               return (
@@ -818,9 +838,14 @@ export default function WorkspacePage({
                   }`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-[11px] uppercase tracking-[0.18em] text-white/45">任务 ID #{task.taskId}</p>
-                      <h3 className="truncate text-base font-semibold text-white">{task.taskName}</h3>
+                      <input
+                        value={task.taskName}
+                        onChange={(event) => updateTaskField(taskIndex, 'taskName', event.target.value)}
+                        className="mt-2 w-full rounded-[0.9rem] border border-white/10 bg-black/20 px-3 py-2 text-base font-semibold text-white outline-none transition focus:border-cyan-300/35"
+                        placeholder="输入任务名称"
+                      />
                     </div>
                     <span
                       className={`shrink-0 rounded-full border px-3 py-1 text-xs font-bold ${
@@ -833,7 +858,15 @@ export default function WorkspacePage({
                     </span>
                   </div>
 
-                  <p className="mt-3 text-sm leading-7 text-white/68">{task.content}</p>
+                  <label className="mt-3 grid gap-2">
+                    <span className="text-xs uppercase tracking-[0.16em] text-white/45">任务描述</span>
+                    <textarea
+                      value={task.content}
+                      onChange={(event) => updateTaskField(taskIndex, 'content', event.target.value)}
+                      className="min-h-[92px] resize-y rounded-[1rem] border border-white/10 bg-black/20 px-3 py-2.5 text-sm leading-7 text-white/72 outline-none transition focus:border-cyan-300/35"
+                      placeholder="输入任务描述"
+                    />
+                  </label>
 
                   <div
                     className={`mt-4 rounded-[1rem] border px-3 py-3 text-sm ${
@@ -849,7 +882,7 @@ export default function WorkspacePage({
                       <span className="text-xs uppercase tracking-[0.16em] text-white/45">责任人</span>
                       <input
                         value={task.owner}
-                        onChange={(event) => updateTaskField(selectedDraft.key, task.key, 'owner', event.target.value)}
+                        onChange={(event) => updateTaskField(taskIndex, 'owner', event.target.value)}
                         className="rounded-[1rem] border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-cyan-300/35"
                         placeholder="输入责任人"
                       />
@@ -859,7 +892,7 @@ export default function WorkspacePage({
                       <span className="text-xs uppercase tracking-[0.16em] text-white/45">截止日期</span>
                       <input
                         value={task.deadline}
-                        onChange={(event) => updateTaskField(selectedDraft.key, task.key, 'deadline', event.target.value)}
+                        onChange={(event) => updateTaskField(taskIndex, 'deadline', event.target.value)}
                         className="rounded-[1rem] border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-cyan-300/35"
                         placeholder="输入截止日期"
                       />
