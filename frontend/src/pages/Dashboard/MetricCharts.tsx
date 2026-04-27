@@ -38,6 +38,7 @@ const metricCards = [
     label: '吞吐量',
     icon: Activity,
     accent: 'text-cyan-100',
+    desc: '系统历史累计成功解析与处理的公文总数。',
     renderValue: (value: number, hasData: boolean) => (hasData ? new Intl.NumberFormat('zh-CN').format(Math.floor(value)) : '--'),
   },
   {
@@ -45,6 +46,7 @@ const metricCards = [
     label: 'RAG 命中率',
     icon: BarChart3,
     accent: 'text-emerald-100',
+    desc: '大模型在处理过程中，成功从本地知识库召回有效参考资料的概率。',
     renderValue: (value: number, hasData: boolean) => (hasData ? `${value.toFixed(1)}%` : '--'),
   },
   {
@@ -52,6 +54,7 @@ const metricCards = [
     label: '平均置信度',
     icon: BrainCircuit,
     accent: 'text-amber-100',
+    desc: 'AI 对其抽取的字段与校验结果的整体把握程度 (0~1)。',
     renderValue: (value: number, hasData: boolean) => (hasData ? value.toFixed(2) : '--'),
   },
 ]
@@ -267,7 +270,7 @@ export default function MetricCharts() {
           type: 'value',
           name: '置信度',
           nameTextStyle: { color: '#64748b', fontSize: 10 },
-          min: 0.8,
+          min: 0.0,
           max: 1.0,
           splitLine: { show: false },
           axisLabel: { color: '#94a3b8', fontSize: 10 },
@@ -345,23 +348,33 @@ export default function MetricCharts() {
 
       <div className="grid gap-4">
         {metricCards.map((metric) => (
-          <GlassEffect
-            key={metric.label}
-            className="h-full rounded-[1.75rem] border-t-2 border-t-white/10 p-5 shadow-[0_15px_35px_-10px_rgba(0,0,0,0.4),0_0_15px_-3px_rgba(6,182,212,0.05)]"
-            contentClassName="w-full"
-          >
-            <div className="flex h-full min-h-[145px] flex-col justify-between gap-5">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm uppercase tracking-[0.16em] text-white/60">{metric.label}</p>
-                <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/12">
-                  <metric.icon className={`h-5 w-5 ${metric.accent}`} />
-                </span>
-              </div>
-              <div>
-                <p className="text-4xl font-semibold text-white">{metric.renderValue(kpi[metric.key].current, hasHistory)}</p>
+          <div key={metric.label} className="group relative h-full">
+            <div className="pointer-events-none absolute -top-12 left-1/2 z-50 -translate-x-1/2 translate-y-2 opacity-0 transition-all duration-300 group-hover:-translate-y-2 group-hover:opacity-100">
+              <div className="relative w-max max-w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-white/10 bg-slate-900/95 px-4 py-2.5 text-center text-xs leading-relaxed text-slate-300 shadow-xl backdrop-blur-md">
+                {metric.desc}
+                <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 border-l-4 border-r-4 border-t-4 border-transparent border-t-slate-900/95" />
               </div>
             </div>
-          </GlassEffect>
+
+            <GlassEffect
+              className="h-full cursor-default rounded-[1.75rem] border-t-2 border-t-white/10 p-5 shadow-[0_15px_35px_-10px_rgba(0,0,0,0.4),0_0_15px_-3px_rgba(6,182,212,0.05)] transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.02] hover:border-t-cyan-400/30 hover:shadow-[0_20px_40px_-10px_rgba(0,0,0,0.5),0_0_20px_2px_rgba(6,182,212,0.2)]"
+              contentClassName="w-full"
+            >
+              <div className="flex h-full min-h-[145px] flex-col justify-between gap-5">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm uppercase tracking-[0.16em] text-white/60 transition-colors duration-300 group-hover:text-white/90">
+                    {metric.label}
+                  </p>
+                  <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white/12 transition-all duration-300 group-hover:bg-white/20 group-hover:shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+                    <metric.icon className={`h-5 w-5 ${metric.accent}`} />
+                  </span>
+                </div>
+                <div>
+                  <p className="text-4xl font-semibold text-white">{metric.renderValue(kpi[metric.key].current, hasHistory)}</p>
+                </div>
+              </div>
+            </GlassEffect>
+          </div>
         ))}
       </div>
     </div>
