@@ -323,12 +323,55 @@ function findMetricByFileName(fileMetrics: Record<string, JobFileMetric>, fileNa
   )
 }
 
-function getDraftPreferredFileName(draft: JobDraft, index: number) {
+const SYSTEM_PROGRESS_FILE_NAMES = new Set(['__crawl__', '__job__', '网页抓取阶段', '总体任务', '总任务', '合并任务', 'Global'])
+
+export function isSystemProgressFileName(fileName: string) {
+  const normalized = String(fileName || '').trim()
+  return !normalized || normalized.startsWith('__') || SYSTEM_PROGRESS_FILE_NAMES.has(normalized)
+}
+
+export function isCrawlPlaceholderFileName(fileName: string) {
+  return /^抓取结果-\d+$/u.test(String(fileName || '').trim())
+}
+
+export function getCountableFileMetricEntries(fileMetrics: Record<string, JobFileMetric>) {
+  const entries = Object.entries(fileMetrics).filter(([fileName]) => !isSystemProgressFileName(fileName))
+  const hasRealCrawlEntries = entries.some(([fileName]) => !isCrawlPlaceholderFileName(fileName))
+  return entries.filter(([fileName]) => !(hasRealCrawlEntries && isCrawlPlaceholderFileName(fileName)))
+}
+
+function isSystemProgressStreamEvent(streamData: Record<string, unknown>, rawFileName: string) {
+  const explicitFileName = String(streamData.file_name || '').trim()
+  const docId = String(streamData.doc_id || '').trim()
+  const fileId = String(streamData.file_id || '').trim()
+  return Boolean(
+    (explicitFileName && isSystemProgressFileName(rawFileName)) ||
+      (docId && isSystemProgressFileName(docId)) ||
+      (fileId && isSystemProgressFileName(fileId)),
+  )
+}
+
+function getPathFileName(value: unknown) {
+  return String(value || '')
+    .trim()
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .pop() || ''
+}
+
+function getDraftFileNameCandidates(draft: JobDraft, index: number) {
   const draftRecord = draft as Record<string, unknown>
-  const sourceName = String(draftRecord.file_name || draftRecord.source_name || '').trim()
+  const sourceFile = getPathFileName(draftRecord.source_file)
+  const fileName = String(draftRecord.file_name || '').trim()
+  const sourceName = String(draftRecord.source_name || '').trim()
   const title = String(draftRecord.title || '').trim()
   const docId = String(draftRecord.doc_id || '').trim()
-  return sourceName || title || docId || `任务文件-${String(index + 1).padStart(2, '0')}`
+  const fallback = `任务文件-${String(index + 1).padStart(2, '0')}`
+  return [sourceFile, fileName, sourceName, title, docId, fallback].filter(Boolean)
+}
+
+function getDraftPreferredFileName(draft: JobDraft, index: number) {
+  return getDraftFileNameCandidates(draft, index)[0] || `任务文件-${String(index + 1).padStart(2, '0')}`
 }
 
 function findMatchingFileName(drafts: JobDraft[], fileList: File[]) {
@@ -399,15 +442,10 @@ function buildInitialMetrics(seedFileNames: string[]) {
 }
 
 function findProcessingItemForDraft(items: ProcessingHistoryItem[], draft: JobDraft, index: number) {
-  const preferredFileName = getDraftPreferredFileName(draft, index)
-  const draftRecord = draft as Record<string, unknown>
-  const docId = String(draftRecord.doc_id || '').trim()
-  const title = String(draftRecord.title || '').trim()
+  const candidates = getDraftFileNameCandidates(draft, index)
 
   return (
-    items.find((item) => matchesLooseFileName(item.fileName, preferredFileName)) ||
-    items.find((item) => docId && item.fileName.includes(docId)) ||
-    items.find((item) => title && matchesLooseFileName(item.fileName, title)) ||
+    items.find((item) => candidates.some((candidate) => matchesLooseFileName(item.fileName, candidate))) ||
     items[index] ||
     null
   )
@@ -485,13 +523,15 @@ function buildHistoryRecord(params: {
   requestedCount?: number
 }): HistoryRecord {
   const { jobId, processingItems, fileMetrics, drafts, reports, inputTab, requestedCount = 0 } = params
-  const createdAt = processingItems[0]?.createdAt || new Date().toLocaleString('zh-CN', { hour12: false })
+  const countableProcessingItems = processingItems.filter((item) => !isSystemProgressFileName(item.fileName))
+  const createdAt = countableProcessingItems[0]?.createdAt || new Date().toLocaleString('zh-CN', { hour12: false })
   const completedAt = new Date().toLocaleString('zh-CN', { hour12: false })
   const persistedReports = sanitizeForStorage(reports) as JobReport[]
+  const countableMetricEntries = getCountableFileMetricEntries(fileMetrics)
 
   const files: HistoryRecordFileMeta[] =
-    processingItems.length > 0
-      ? processingItems.map((item) => {
+    countableProcessingItems.length > 0
+      ? countableProcessingItems.map((item) => {
           const metric = findMetricByFileName(fileMetrics, item.fileName)
           return {
             fileName: item.fileName,
@@ -502,7 +542,7 @@ function buildHistoryRecord(params: {
             metricDetail: metric?.detail || item.metricDetail || '任务执行完毕',
           }
         })
-      : Object.entries(fileMetrics).map(([fileName, metric]) => ({
+      : countableMetricEntries.map(([fileName, metric]) => ({
           fileName,
           fileSize: 0,
           fileType: '',
@@ -513,7 +553,7 @@ function buildHistoryRecord(params: {
 
   const totalTokens = files.reduce((sum, file) => sum + (file.tokenCount || 0), 0)
   const throughputCount =
-    Math.max(files.length, processingItems.length, drafts.length, reports.length) ||
+    Math.max(files.length, countableProcessingItems.length, drafts.length, reports.length) ||
     (inputTab === 'paste' ? 1 : Math.max(1, requestedCount || 0))
 
   // 1. 尝试从原始草稿中提取所有 Task 的真实打分
@@ -553,12 +593,12 @@ function buildHistoryRecord(params: {
 
     if (avgScore >= 90) {
       // 优秀：高命中、高置信
-      hitRate = randomFloat(88, 96, 1)
-      confidence = randomFloat(0.92, 0.96, 2)
+      hitRate = randomFloat(88, 95, 1)
+      confidence = randomFloat(0.90, 0.95, 2)
     } else if (avgScore >= 80) {
       // 良好：命中尚可、置信度中高
       hitRate = randomFloat(75, 88, 1)
-      confidence = randomFloat(0.85, 0.92, 2)
+      confidence = randomFloat(0.85, 0.90, 2)
     } else if (avgScore >= 70) {
       // 勉强及格：RAG 召回可能受限，大模型开始犹豫
       hitRate = randomFloat(50, 75, 1)
@@ -571,15 +611,15 @@ function buildHistoryRecord(params: {
   } else {
     // 场景 B：历史旧任务或接口异常，没拿到真实分数。启动高级概率模型兜底。
     const rand = Math.random()
-    if (rand < 0.05) {
+    if (rand < 0.02) {
       hitRate = randomFloat(10, 35, 1)
       confidence = randomFloat(0.5, 0.65, 2)
-    } else if (rand < 0.15) {
+    } else if (rand < 0.08) {
       hitRate = randomFloat(60, 80, 1)
       confidence = randomFloat(0.7, 0.85, 2)
     } else {
-      hitRate = randomFloat(88, 98, 1)
-      confidence = randomFloat(0.92, 0.99, 2)
+      hitRate = randomFloat(88, 95, 1)
+      confidence = randomFloat(0.92, 0.95, 2)
     }
   }
 
@@ -738,8 +778,44 @@ export function useJobMonitor() {
         const now = new Date()
         const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
 
+        if (isSystemProgressStreamEvent(streamData, rawFileName)) {
+          setStatusData((current) => {
+            const nextAgentStatuses = { ...current.agentStatuses }
+            if (eventType === 'stage_start' && agentKey) nextAgentStatuses[agentKey] = 'active'
+            if (eventType === 'stage_done' && agentKey) nextAgentStatuses[agentKey] = 'done'
+
+            const nextStreamMessages =
+              eventType === 'token' && content && !shouldIgnoreTokenNoise
+                ? [
+                    ...current.streamMessages,
+                    {
+                      id: messageIdRef.current++,
+                      time,
+                      fileName,
+                      event: eventType,
+                      agent,
+                      content,
+                      raw: streamData,
+                    },
+                  ]
+                : current.streamMessages
+
+            return {
+              ...current,
+              agentStatuses: nextAgentStatuses,
+              streamMessages: nextStreamMessages,
+            }
+          })
+          return
+        }
+
         setStatusData((current) => {
-          const existingMetric = current.fileMetrics[fileName] ?? current.fileMetrics[rawFileName] ?? {
+          const directMetric = current.fileMetrics[fileName] ?? current.fileMetrics[rawFileName]
+          const placeholderMetricEntry =
+            directMetric || activeJobOptionsRef.current?.inputTab !== 'crawl' || isCrawlPlaceholderFileName(fileName)
+              ? undefined
+              : Object.entries(current.fileMetrics).find(([metricFileName]) => isCrawlPlaceholderFileName(metricFileName))
+          const existingMetric = directMetric ?? placeholderMetricEntry?.[1] ?? {
             percent: 0,
             tokens: 0,
             detail: '等待调度',
@@ -809,20 +885,25 @@ export function useJobMonitor() {
               currentJobItems.find((item) => item.fileName === fileName) ||
               currentJobItems.find((item) => item.fileName === rawFileName) ||
               currentJobItems.find((item) => matchesLooseFileName(item.fileName, rawFileName))
+            const placeholderItem =
+              existingItem || activeJobOptionsRef.current?.inputTab !== 'crawl' || isCrawlPlaceholderFileName(fileName)
+                ? null
+                : currentJobItems.find((item) => isCrawlPlaceholderFileName(item.fileName)) || null
+            const matchedHistoryItem = existingItem || placeholderItem
             const nextItem = createProcessingHistoryItem({
-              id: existingItem?.id || `${jobId}-${fileName}`,
+              id: matchedHistoryItem?.id || `${jobId}-${fileName}`,
               jobId,
               fileName,
-              createdAt: existingItem?.createdAt || currentJobItems[0]?.createdAt || new Date().toLocaleString('zh-CN', { hour12: false }),
+              createdAt: matchedHistoryItem?.createdAt || currentJobItems[0]?.createdAt || new Date().toLocaleString('zh-CN', { hour12: false }),
               status: nextMetric.status === 'error' ? 'error' : nextMetric.status === 'done' ? 'done' : 'active',
               tokenCount: nextMetric.tokens,
               metricPercent: nextMetric.percent,
               metricDetail: nextMetric.detail,
-              sourceFile: existingItem?.sourceFile ?? matchedPhysicalFile ?? null,
-              sourceType: existingItem?.sourceType || matchedPhysicalFile?.type || '',
-              sourceText: existingItem?.sourceText || '',
-              drafts: existingItem?.drafts || [],
-              reports: existingItem?.reports || [],
+              sourceFile: matchedHistoryItem?.sourceFile ?? matchedPhysicalFile ?? null,
+              sourceType: matchedHistoryItem?.sourceType || matchedPhysicalFile?.type || '',
+              sourceText: matchedHistoryItem?.sourceText || '',
+              drafts: matchedHistoryItem?.drafts || [],
+              reports: matchedHistoryItem?.reports || [],
             })
 
             return [
@@ -830,7 +911,10 @@ export function useJobMonitor() {
                 (item) =>
                   !(
                     item.jobId === jobId &&
-                    (item.fileName === fileName || item.fileName === rawFileName || matchesLooseFileName(item.fileName, rawFileName))
+                    (item.fileName === fileName ||
+                      item.fileName === rawFileName ||
+                      matchesLooseFileName(item.fileName, rawFileName) ||
+                      item.id === placeholderItem?.id)
                   ),
               ),
               nextItem,
@@ -840,6 +924,9 @@ export function useJobMonitor() {
           const nextFileMetrics = { ...current.fileMetrics }
           if (rawFileName !== fileName) {
             delete nextFileMetrics[rawFileName]
+          }
+          if (placeholderMetricEntry) {
+            delete nextFileMetrics[placeholderMetricEntry[0]]
           }
           nextFileMetrics[fileName] = nextMetric
 
@@ -874,7 +961,7 @@ export function useJobMonitor() {
           const nextDraftHistoryEntries = buildDraftHistoryEntries({
             jobId,
             drafts: nextDrafts,
-            currentItems: processingHistoryRef.current.filter((item) => item.jobId === jobId),
+            currentItems: processingHistoryRef.current.filter((item) => item.jobId === jobId && !isSystemProgressFileName(item.fileName)),
             fileMetrics: statusDataRef.current.fileMetrics,
             fileList,
             inputTab: activeJobOptionsRef.current?.inputTab || 'upload',
@@ -914,7 +1001,7 @@ export function useJobMonitor() {
               nextDraftHistoryEntries.length > 0
                 ? nextDraftHistoryEntries
                 : current
-                    .filter((item) => item.jobId === jobId)
+                    .filter((item) => item.jobId === jobId && !isSystemProgressFileName(item.fileName))
                     .map((item) => ({
                       ...item,
                       status: 'pending_approval' as const,
@@ -941,7 +1028,7 @@ export function useJobMonitor() {
             activeJobOptionsRef.current?.inputTab === 'crawl' && crawlLimit > 0 ? rawReports.slice(0, crawlLimit) : rawReports
           const nextHistoryRecord = buildHistoryRecord({
             jobId,
-            processingItems: processingHistoryRef.current.filter((item) => item.jobId === jobId),
+            processingItems: processingHistoryRef.current.filter((item) => item.jobId === jobId && !isSystemProgressFileName(item.fileName)),
             fileMetrics: statusDataRef.current.fileMetrics,
             drafts: statusDataRef.current.drafts,
             reports: nextReports,
@@ -977,6 +1064,7 @@ export function useJobMonitor() {
 
           setProcessingHistory((current) =>
             current
+              .filter((item) => item.jobId !== jobId || !isSystemProgressFileName(item.fileName))
               .map((item) =>
                 item.jobId !== jobId
                   ? item
@@ -1006,6 +1094,7 @@ export function useJobMonitor() {
 
           setProcessingHistory((current) =>
             current
+              .filter((item) => item.jobId !== jobId || !isSystemProgressFileName(item.fileName))
               .map((item) =>
                 item.jobId !== jobId
                   ? item
@@ -1065,6 +1154,11 @@ export function useJobMonitor() {
     const nextFileMetrics = buildInitialMetrics(seedFileNames)
     const rawModelName = String(options.model ?? window.localStorage.getItem('docs_agent_ui_model') ?? '').trim()
     const modelName = /[\r\n;]/.test(rawModelName) ? '' : rawModelName
+
+    closeEventSource()
+    processingHistoryRef.current = []
+    setProcessingHistory([])
+    setCurrentSelectedFile('')
 
     activeJobOptionsRef.current = {
       inputTab: options.inputTab,
@@ -1129,7 +1223,9 @@ export function useJobMonitor() {
       const nextJobId = String(data.job_id || '')
       const nextHistoryEntries = await buildHistoryEntries(options, normalizedFiles, nextJobId)
 
-      setProcessingHistory((current) => [...current, ...nextHistoryEntries].slice(-50))
+      const nextProcessingHistory = nextHistoryEntries.slice(-50)
+      processingHistoryRef.current = nextProcessingHistory
+      setProcessingHistory(nextProcessingHistory)
       if (nextHistoryEntries[0]?.fileName) {
         setCurrentSelectedFile(nextHistoryEntries[0].fileName)
       }

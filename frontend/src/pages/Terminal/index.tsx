@@ -1,5 +1,6 @@
 import ThinkingConsole, { type ThinkingConsoleHandle } from '@/components/ThinkingConsole'
 import { useGlobalAppContext } from '@/context/GlobalAppContext'
+import { getCountableFileMetricEntries } from '@/hooks/useJobMonitor'
 import type { JobStatusData } from '@/hooks/useJobMonitor'
 import { ArrowLeft, ChevronLeft, ChevronRight, Eye, MonitorCog, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
@@ -16,7 +17,7 @@ export default function TerminalPage({ statusData, onClearLogs }: TerminalPagePr
   const [autoScroll, setAutoScroll] = useState(true)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const receivedLogs = statusData.streamMessages.length
-  const processingFiles = Object.values(statusData.fileMetrics).filter((metric) => metric.status === 'active').length
+  const processingFiles = getCountableFileMetricEntries(statusData.fileMetrics).filter(([, metric]) => metric.status === 'active').length
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#010409] text-white">

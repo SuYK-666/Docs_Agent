@@ -1,5 +1,6 @@
 import { useGlobalAppContext } from '@/context/GlobalAppContext'
 import { GlassEffect } from '@/components/ui/liquid-glass'
+import { isSystemProgressFileName } from '@/hooks/useJobMonitor'
 import * as echarts from 'echarts'
 import { Activity, BarChart3, BrainCircuit } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -112,7 +113,10 @@ export default function MetricCharts() {
 
     return {
       ...record,
-      totalFilesProcessed: historyRecords.reduce((sum, item) => sum + (item.files?.length || 0), 0),
+      totalFilesProcessed: historyRecords.reduce(
+        (sum, item) => sum + (item.files?.filter((file) => !isSystemProgressFileName(file.fileName)).length || 0),
+        0,
+      ),
     }
   }, [historyRecords])
 
