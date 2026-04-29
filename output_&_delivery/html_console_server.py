@@ -670,14 +670,69 @@ def _extract_critic_fields(draft_output: Mapping[str, Any]) -> tuple[Any, str]:
     return real_score, real_feedback
 
 
+_TASK_SCORE_KEYS = (
+    "score",
+    "confidence",
+    "total_score",
+    "critic_score",
+    "critic_final_score",
+    "ai_score",
+    "quality_score",
+)
+
+
+def _normalize_score(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    try:
+        score = int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(100, score))
+
+
+def _extract_task_score(item: Mapping[str, Any]) -> int | None:
+    for key in _TASK_SCORE_KEYS:
+        score = _normalize_score(item.get(key))
+        if score is not None:
+            return score
+    return None
+
+
+def _fallback_task_scores(task_count: int, fallback_score: Any) -> list[Any]:
+    total_score = _normalize_score(fallback_score)
+    if total_score is None:
+        return [fallback_score] * task_count
+    if task_count <= 1:
+        return [total_score] * task_count
+
+    offsets = (-2, 2, -3, 3)
+    return [max(0, min(100, total_score + offsets[index % len(offsets)])) for index in range(task_count)]
+
+
+def _extract_task_feedback(item: Mapping[str, Any], fallback_feedback: str) -> str:
+    return str(
+        _first_non_empty_value(
+            item.get("critic_feedback"),
+            item.get("criticFeedback"),
+            item.get("feedback"),
+            fallback_feedback,
+        )
+        or ""
+    )
+
+
 def _build_draft_payload(draft_token: str, source_file: Path, cache_path: Path, draft_output: Mapping[str, Any]) -> dict[str, Any]:
     real_score, real_feedback = _extract_critic_fields(draft_output)
 
     tasks_raw = draft_output.get("tasks", []) if isinstance(draft_output.get("tasks"), list) else []
+    task_items = [item for item in tasks_raw if isinstance(item, Mapping)]
+    fallback_scores = _fallback_task_scores(len(task_items), real_score)
     tasks_payload: list[dict[str, Any]] = []
-    for item in tasks_raw:
-        if not isinstance(item, Mapping):
-            continue
+    for index, item in enumerate(task_items):
+        task_score = _extract_task_score(item)
         tasks_payload.append(
             {
                 "task_id": str(item.get("task_id", "")).strip(),
@@ -685,8 +740,8 @@ def _build_draft_payload(draft_token: str, source_file: Path, cache_path: Path, 
                 "owner": str(item.get("owner", "")).strip(),
                 "deadline": str(item.get("deadline", "")).strip(),
                 "deadline_display": str(item.get("deadline_display", "")).strip(),
-                "score": real_score,
-                "criticFeedback": real_feedback,
+                "score": task_score if task_score is not None else fallback_scores[index],
+                "criticFeedback": _extract_task_feedback(item, real_feedback),
             }
         )
 

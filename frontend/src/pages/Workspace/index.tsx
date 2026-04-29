@@ -2,6 +2,7 @@ import { useGlobalAppContext } from '@/context/GlobalAppContext'
 import type { HistoryRecord } from '@/context/GlobalAppContext'
 import type { ProcessingHistoryItem } from '@/context/GlobalAppContext'
 import { GlassEffect, GlassFilter } from '@/components/ui/liquid-glass'
+import { isSystemProgressFileName } from '@/hooks/useJobMonitor'
 import type { JobDraft, JobReport, JobStatusData, SubmitApprovalOptions } from '@/hooks/useJobMonitor'
 import { ChevronLeft, ChevronRight, Download, FileSearch, FolderOpen, PanelsTopLeft } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -72,6 +73,14 @@ function readNumber(record: Record<string, unknown>, keys: string[], fallback = 
   return fallback
 }
 
+function getPathFileName(value: unknown) {
+  return String(value || '')
+    .trim()
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .pop() || ''
+}
+
 function getDraftTasks(draft: JobDraft) {
   const draftRecord = draft as Record<string, unknown>
   if (Array.isArray(draftRecord.tasks)) return draftRecord.tasks as unknown[]
@@ -84,7 +93,8 @@ function getDraftTasks(draft: JobDraft) {
 
 function getDraftKey(draft: JobDraft, index: number) {
   const draftRecord = draft as Record<string, unknown>
-  return readString(draftRecord, ['doc_id', 'title', 'name'], `draft-${index + 1}`)
+  const identity = getPathFileName(draftRecord.source_file) || readString(draftRecord, ['file_name', 'source_name', 'doc_id', 'title', 'name'], `draft-${index + 1}`)
+  return `${identity}-${index}`
 }
 
 function buildWorkspaceDrafts(drafts: JobDraft[]): WorkspaceDraft[] {
@@ -92,7 +102,7 @@ function buildWorkspaceDrafts(drafts: JobDraft[]): WorkspaceDraft[] {
     const draftRecord = draft as Record<string, unknown>
     const docId = readString(draftRecord, ['doc_id', 'docId'], `draft-${draftIndex + 1}`)
     const title = readString(draftRecord, ['title', 'name'], `待审批草稿 ${draftIndex + 1}`)
-    const sourceName = readString(draftRecord, ['file_name', 'source_name', 'title'], title)
+    const sourceName = getPathFileName(draftRecord.source_file) || readString(draftRecord, ['file_name', 'source_name', 'title'], title)
 
     const tasks = getDraftTasks(draft).map((task, taskIndex) => {
       const taskRecord = readRecord(task)
@@ -292,6 +302,7 @@ function buildWorkspaceHistoryItems(
   historyRecords: HistoryRecord[],
 ): WorkspaceHistoryListItem[] {
   const liveItems = [...processingHistory]
+    .filter((item) => !isSystemProgressFileName(item.fileName))
     .reverse()
     .map<WorkspaceHistoryListItem>((item) => ({
       key: item.id,
@@ -305,7 +316,7 @@ function buildWorkspaceHistoryItems(
       isArchived: false,
     }))
 
-  const liveJobIds = new Set(processingHistory.map((item) => item.jobId))
+  const liveJobIds = new Set(processingHistory.filter((item) => !isSystemProgressFileName(item.fileName)).map((item) => item.jobId))
   const archivedItems = [...historyRecords]
     .reverse()
     .filter((record) => !liveJobIds.has(record.jobId))
@@ -357,6 +368,7 @@ export default function WorkspacePage({
   const [reportPreviewUrl, setReportPreviewUrl] = useState('')
   const [isLocalSubmitting, setIsLocalSubmitting] = useState(false)
   const sourceObjectUrlRef = useRef('')
+  const sourceObjectUrlKeyRef = useRef('')
   const sourceDocxTimerRef = useRef<number | null>(null)
 
   const isApprovalStage = statusData.jobStatus === 'pending_approval'
@@ -444,6 +456,10 @@ export default function WorkspacePage({
   const selectedSourceFile = isArchivedSelection ? null : liveSelectedFile || selectedHistoryItem?.sourceFile || null
   const selectedSourceType = isArchivedSelection ? '' : selectedHistoryItem?.sourceType || selectedSourceFile?.type || ''
   const selectedSourceName = (isArchivedSelection ? '' : selectedSourceFile?.name || selectedHistoryItem?.fileName || '').toLowerCase()
+  const selectedSourceText = selectedHistoryItem?.sourceText || ''
+  const selectedSourceFileKey = selectedSourceFile
+    ? `${selectedSourceFile.name}:${selectedSourceFile.size}:${selectedSourceFile.lastModified}:${selectedSourceFile.type}`
+    : ''
   const crawlerMeta = useMemo(() => parseCrawlerMeta(selectedHistoryItem?.sourceText || ''), [selectedHistoryItem?.sourceText])
   const releasedHistorySource = Boolean(
     selectedHistoryItem &&
@@ -480,26 +496,31 @@ export default function WorkspacePage({
       }
       if (sourceObjectUrlRef.current) {
         URL.revokeObjectURL(sourceObjectUrlRef.current)
+        sourceObjectUrlRef.current = ''
+        sourceObjectUrlKeyRef.current = ''
       }
     }
   }, [])
 
   useEffect(() => {
-    if (sourceObjectUrlRef.current) {
+    const releaseObjectUrl = () => {
+      if (!sourceObjectUrlRef.current) return
       URL.revokeObjectURL(sourceObjectUrlRef.current)
       sourceObjectUrlRef.current = ''
+      sourceObjectUrlKeyRef.current = ''
     }
 
-    setPreviewUrl('')
     setPreviewText('')
     setPreviewLoading(false)
 
     const sourceFile = selectedSourceFile
-    const sourceText = selectedHistoryItem?.sourceText || ''
+    const sourceText = selectedSourceText
     const sourceType = selectedSourceType
     const sourceName = selectedSourceName
 
     if (isArchivedSelection) {
+      releaseObjectUrl()
+      setPreviewUrl('')
       setPreviewType('unsupported')
       const container = document.getElementById('docx-preview-container')
       if (container) container.innerHTML = ''
@@ -507,6 +528,8 @@ export default function WorkspacePage({
     }
 
     if (!selectedHistoryItem && !liveSelectedFile) {
+      releaseObjectUrl()
+      setPreviewUrl('')
       setPreviewType('unsupported')
       const container = document.getElementById('docx-preview-container')
       if (container) container.innerHTML = ''
@@ -514,58 +537,82 @@ export default function WorkspacePage({
     }
 
     if (releasedHistorySource) {
+      releaseObjectUrl()
+      setPreviewUrl('')
       setPreviewType('unsupported')
       const container = document.getElementById('docx-preview-container')
       if (container) container.innerHTML = ''
       return
     }
 
+    const showObjectPreview = (type: SourcePreviewType) => {
+      const objectUrlKey = `${type}:${selectedSourceFileKey}`
+      if (sourceObjectUrlRef.current && sourceObjectUrlKeyRef.current === objectUrlKey) {
+        setPreviewType(type)
+        setPreviewUrl(sourceObjectUrlRef.current)
+        return
+      }
+
+      releaseObjectUrl()
+      const objectUrl = URL.createObjectURL(sourceFile as File)
+      sourceObjectUrlRef.current = objectUrl
+      sourceObjectUrlKeyRef.current = objectUrlKey
+      setPreviewType(type)
+      setPreviewUrl(objectUrl)
+    }
+
     if (sourceFile) {
       if (sourceFile.type.startsWith('image/')) {
-        const objectUrl = URL.createObjectURL(sourceFile)
-        sourceObjectUrlRef.current = objectUrl
-        setPreviewType('image')
-        setPreviewUrl(objectUrl)
+        showObjectPreview('image')
         return
       }
 
       if (sourceFile.type === 'application/pdf' || sourceName.endsWith('.pdf')) {
-        const objectUrl = URL.createObjectURL(sourceFile)
-        sourceObjectUrlRef.current = objectUrl
-        setPreviewType('pdf')
-        setPreviewUrl(objectUrl)
+        showObjectPreview('pdf')
         return
       }
 
       if (sourceFile.type.includes('text') || sourceName.endsWith('.md') || sourceName.endsWith('.txt')) {
+        releaseObjectUrl()
+        setPreviewUrl('')
         setPreviewType('text')
         setPreviewText(sourceText)
         return
       }
 
       if (sourceName.endsWith('.docx')) {
+        releaseObjectUrl()
+        setPreviewUrl('')
         setPreviewType('docx')
         return
       }
     }
 
     if (sourceType === 'crawl-target') {
+      releaseObjectUrl()
+      setPreviewUrl('')
       setPreviewType('crawl')
       return
     }
 
     if (sourceType === 'pasted-text' || sourceText) {
+      releaseObjectUrl()
+      setPreviewUrl('')
       setPreviewType('text')
       setPreviewText(sourceText)
       return
     }
 
     if (sourceType.includes('text')) {
+      releaseObjectUrl()
+      setPreviewUrl('')
       setPreviewType('text')
       setPreviewText('原始文件已归档以节省内存，当前仅保留文本快照。')
       return
     }
 
+    releaseObjectUrl()
+    setPreviewUrl('')
     setPreviewType('unsupported')
     const container = document.getElementById('docx-preview-container')
     if (container) container.innerHTML = ''
@@ -573,11 +620,11 @@ export default function WorkspacePage({
     currentSelectedFile,
     liveSelectedFile,
     releasedHistorySource,
-    selectedHistoryItem,
     selectedSourceFile,
+    selectedSourceFileKey,
     selectedSourceName,
+    selectedSourceText,
     selectedSourceType,
-    sourcePaneVisible,
     isArchivedSelection,
   ])
 
